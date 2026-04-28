@@ -1,0 +1,384 @@
+CONTENT BROADCASTING SYSTEM - ARCHITECTURE NOTES
+===================================================
+
+1. AUTHENTICATION & RBAC FLOW
+============================
+
+JWT-Based Authentication:
+- Users login with email/password → Server validates credentials → Issues JWT token
+- Token contains: user id, email, role, expiration time
+- Token sent in Authorization header: "Bearer <token>"
+- Middleware validates token on protected routes
+
+Role-Based Access Control (RBAC):
+- Two roles: Principal, Teacher
+- Principal permissions:
+  * View all users and content
+  * Approve/reject content
+  * Delete any content
+  * View system statistics
+- Teacher permissions:
+  * Upload content
+  * View own content
+  * Delete own content (only uploaded/rejected status)
+  * Manage content scheduling
+
+Authentication Middleware Flow:
+1. Extract token from Authorization header
+2. Verify JWT signature and expiration
+3. Fetch user from database
+4. Attach user to request object
+5. Role-based middleware checks permissions
+
+2. SUBJECT-BASED SYSTEM DESIGN
+=============================
+
+Content Organization:
+- Content organized by subjects (Mathematics, Science, etc.)
+- Each subject has independent rotation and scheduling
+- Content slots represent subject categories
+- Teachers can upload content for any subject
+
+Data Flow:
+- Content uploaded → Assigned to subject → Added to rotation queue
+- Each subject maintains its own rotation schedule
+- Public APIs can filter by subject or teacher
+
+Benefits:
+- Scalable subject management
+- Independent subject rotations
+- Easy content categorization
+- Teacher-specific content organization
+
+3. UPLOAD HANDLING APPROACH
+===========================
+
+File Upload Process:
+1. Multer middleware handles multipart/form-data
+2. File validation: type (JPG/PNG/GIF), size (max 10MB)
+3. Unique filename generation: <name>-<timestamp>-<random>.<ext>
+4. Local storage in /uploads directory
+5. Database stores file metadata and URL
+
+File Storage Strategy:
+- Current: Local filesystem storage
+- Scalable: Can be extended to cloud storage (S3)
+- File cleanup: Automatic on content deletion
+- Access: Static file serving via Express
+
+Security Measures:
+- File type validation using MIME types
+- File size limits
+- Unique filename generation prevents conflicts
+- Upload rate limiting (20 uploads/hour)
+
+4. APPROVAL WORKFLOW DESIGN
+===========================
+
+Content Lifecycle:
+1. UPLOADED → PENDING (automatic transition)
+2. PENDING → APPROVED/REJECTED (principal action)
+3. APPROVED → Available for broadcasting
+4. REJECTED → Visible to teacher with reason
+
+Approval Process:
+- Teachers upload content → Status: pending
+- Principals view pending content queue
+- Principal can approve or reject with reason
+- Email notifications (future enhancement)
+- Audit trail maintained (approved_by, approved_at)
+
+Workflow Benefits:
+- Content quality control
+- Clear approval chain
+- Audit capabilities
+- Teacher feedback mechanism
+
+5. SCHEDULING/ROTATION LOGIC (CRITICAL)
+=======================================
+
+Rotation Algorithm:
+- Time-based rotation using current timestamp
+- Each content item has rotation_duration (default 5 minutes)
+- Cumulative duration calculation for position determination
+- Subject-independent rotation cycles
+
+Mathematical Logic:
+1. Calculate total rotation cycle: Σ(content_duration)
+2. Get current time in minutes: floor(current_timestamp / 60)
+3. Calculate position: current_time % total_cycle_duration
+4. Find content where position < cumulative_duration
+
+Time Window Handling:
+- Content respects start_time and end_time
+- Outside time window = not active for rotation
+- No time window = always active when approved
+- Real-time validation on each request
+
+Rotation Features:
+- Automatic content switching
+- Seamless transitions
+- Time-based precision
+- Subject isolation
+
+6. DATABASE DESIGN DECISIONS
+===========================
+
+Table Structure:
+- Users: Authentication and role management
+- Content: Content metadata and status tracking
+- Content_Slots: Subject categories
+- Content_Schedule: Rotation configuration
+
+Relationships:
+- Users 1:N Content (teacher uploads)
+- Content 1:1 Content_Schedule (rotation settings)
+- Content_Slots 1:N Content_Schedule (subject organization)
+
+Indexing Strategy:
+- User email for quick authentication
+- Content status for approval queries
+- Content subject for subject-based queries
+- Content uploaded_by for teacher content queries
+
+Database Features:
+- Automatic timestamp updates via triggers
+- Foreign key constraints for data integrity
+- Unique constraints to prevent duplicates
+- JSON support for future extensibility
+
+7. FOLDER STRUCTURE
+===================
+
+src/
+├── app.js                 # Main application entry point
+├── controllers/           # Request handlers
+│   ├── authController.js
+│   ├── contentController.js
+│   ├── uploadController.js
+│   ├── userController.js
+│   └── publicController.js
+├── middlewares/           # Request processing
+│   ├── auth.js           # JWT and RBAC
+│   ├── validation.js     # Input validation
+│   ├── fileUpload.js     # File upload handling
+│   ├── rateLimiter.js    # Rate limiting
+│   └── errorHandler.js   # Error handling
+├── models/               # Database models
+│   ├── database.js       # DB connection
+│   ├── init.sql          # Schema definition
+│   ├── initDatabase.js   # DB initialization
+│   ├── User.js
+│   ├── Content.js
+│   ├── ContentSlot.js
+│   └── ContentSchedule.js
+├── routes/               # API route definitions
+│   ├── auth.js
+│   ├── users.js
+│   ├── content.js
+│   ├── upload.js
+│   └── public.js
+├── services/             # Business logic
+│   └── schedulingService.js
+└── utils/                # Utility functions
+    ├── jwtUtils.js
+    └── passwordUtils.js
+
+uploads/                  # File storage directory
+
+8. MIDDLEWARE USAGE
+==================
+
+Authentication Middleware:
+- JWT token validation
+- User attachment to request
+- Role-based access control
+
+Validation Middleware:
+- Input sanitization
+- Format validation
+- Business rule validation
+
+Error Handling Middleware:
+- Centralized error processing
+- Consistent error responses
+- Development vs production modes
+
+Rate Limiting Middleware:
+- Request throttling
+- Protection against abuse
+- Different limits per endpoint type
+
+File Upload Middleware:
+- Multer configuration
+- File type validation
+- Size limit enforcement
+- Error handling
+
+9. SCALABILITY APPROACH
+======================
+
+Current Architecture:
+- Single-node application
+- PostgreSQL database
+- Local file storage
+- In-memory scheduling
+
+Scalability Enhancements:
+
+Caching Strategy:
+- Redis for session storage
+- Content caching for public APIs
+- Database query result caching
+- Static file CDN integration
+
+Database Scaling:
+- Read replicas for public APIs
+- Connection pooling
+- Database sharding by subject
+- Query optimization
+
+File Storage Scaling:
+- Cloud storage (AWS S3, Google Cloud Storage)
+- CDN integration for global access
+- Image optimization and resizing
+- Backup and disaster recovery
+
+Application Scaling:
+- Load balancing with multiple instances
+- Container orchestration (Docker/Kubernetes)
+- Microservices decomposition
+- API gateway integration
+
+Queue System:
+- Background job processing
+- Email notification queues
+- File processing queues
+- Analytics data collection
+
+Monitoring & Observability:
+- Application metrics (Prometheus)
+- Log aggregation (ELK stack)
+- Performance monitoring
+- Health checks and alerts
+
+10. SECURITY CONSIDERATIONS
+==========================
+
+Authentication Security:
+- JWT token expiration (24 hours)
+- Password hashing with bcrypt (12 rounds)
+- Rate limiting on auth endpoints
+- Secure password policies
+
+Data Security:
+- Parameterized queries (SQL injection prevention)
+- Input validation and sanitization
+- File upload validation
+- CORS configuration
+
+API Security:
+- Rate limiting per endpoint type
+- Request size limits
+- HTTPS enforcement (production)
+- Security headers (helmet.js)
+
+Access Control:
+- Role-based permissions
+- Resource ownership validation
+- Principal-only endpoints protection
+- Teacher content isolation
+
+11. PERFORMANCE OPTIMIZATIONS
+=============================
+
+Database Optimizations:
+- Strategic indexing
+- Query optimization
+- Connection pooling
+- Prepared statements
+
+Application Optimizations:
+- Async/await for non-blocking I/O
+- Efficient file handling
+- Memory management
+- Response compression
+
+Caching Strategies:
+- In-memory caching for frequent queries
+- Static file caching
+- API response caching
+- Database query result caching
+
+12. TESTING STRATEGY
+===================
+
+Unit Testing:
+- Model testing with database mocks
+- Service layer testing
+- Utility function testing
+- Middleware testing
+
+Integration Testing:
+- API endpoint testing
+- Database integration
+- File upload testing
+- Authentication flow testing
+
+End-to-End Testing:
+- Complete user workflows
+- Content lifecycle testing
+- Public API functionality
+- Error scenario testing
+
+13. DEPLOYMENT CONSIDERATIONS
+=============================
+
+Environment Configuration:
+- Environment variables for sensitive data
+- Database connection management
+- File storage configuration
+- Logging configuration
+
+Production Setup:
+- Process management (PM2)
+- Reverse proxy (Nginx)
+- SSL/TLS configuration
+- Backup strategies
+
+Monitoring:
+- Application performance monitoring
+- Error tracking
+- Resource usage monitoring
+- API analytics
+
+14. FUTURE ENHANCEMENTS
+======================
+
+Planned Features:
+- Real-time notifications (WebSocket)
+- Content analytics dashboard
+- Mobile app APIs
+- Content versioning
+- Bulk operations
+- Content templates
+- Advanced scheduling
+- Multi-language support
+
+Technical Improvements:
+- GraphQL API
+- Microservices architecture
+- Event-driven architecture
+- Machine learning for content recommendations
+- Advanced search and filtering
+- Content compression and optimization
+
+Architecture Benefits:
+- Modular design for easy maintenance
+- Clear separation of concerns
+- Scalable database design
+- Flexible authentication system
+- Robust error handling
+- Comprehensive logging
+- Security-first approach
+- Performance optimization ready
