@@ -39,7 +39,21 @@ const register = async (req, res) => {
     });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ error: 'Registration failed' });
+    console.error('Full error details:', {
+      message: error.message,
+      code: error.code,
+      detail: error.detail,
+      hint: error.hint,
+      stack: error.stack,
+      severity: error.severity,
+      where: error.where,
+      routine: error.routine
+    });
+    res.status(500).json({
+      error: 'Registration failed',
+      details: error.message,
+      code: error.code
+    });
   }
 };
 
